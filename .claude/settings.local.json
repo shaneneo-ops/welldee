@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm -v)",
+      "mcp__391d42cf-c3a8-404b-a547-40dc68a0b498__get_account_summary",
+      "mcp__391d42cf-c3a8-404b-a547-40dc68a0b498__get_account_positions",
+      "mcp__391d42cf-c3a8-404b-a547-40dc68a0b498__get_account_balances",
+      "Bash(npm create *)",
+      "Bash(npx --yes create-vite@latest temp-scaffold --template react)",
+      "Bash(npm run *)",
+      "mcp__554e3201-3318-46df-993f-63e8fcf6e0b8__create_file",
+      "mcp__554e3201-3318-46df-993f-63e8fcf6e0b8__read_file_content",
+      "Bash(awk -F',' '{print NF, $0}' /private/tmp/claude-501/-Users-leopard-Welldee/d691b9c1-95de-46c1-a067-db826df1bc99/scratchpad/welldee_holdings_v4.csv)",
+      "Bash(npm list *)",
+      "Bash(npm install *)",
+      "Bash(awk '{print $2}')"
+    ]
+  }
+}
