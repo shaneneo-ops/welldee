@@ -276,7 +276,7 @@ export function StandardCharteredForm() {
         </div>
 
         {/* Add new holding form */}
-        <div className="mt-3 p-3 rounded-2xl" style={{ backgroundColor: 'var(--wd-card-bg-alt)', border: '2px dashed var(--wd-card-border)' }}>
+        <div className="mt-3 p-3 rounded-2xl" style={{ backgroundColor: 'var(--wd-card-bg-alt)', border: '2px var(--wd-border-style) var(--wd-card-border)' }}>
           <p className="wd-label mb-2 text-xs">Add New Holding</p>
           <div className="space-y-2 text-sm">
             <input
@@ -326,7 +326,7 @@ export function StandardCharteredForm() {
         </div>
       </div>
 
-      <div className="border-t border-dashed" style={{ borderColor: 'var(--wd-card-border)' }}>
+      <div className="border-t wd-divider">
         <p className="wd-label mt-4 mb-2">Cash</p>
         <NumberField label="SGD Cash" value={cash.SGD ?? 0} onChange={(v) => setCash({ ...cash, SGD: v })} />
         <NumberField label="USD Cash (optional)" value={cash.USD ?? 0} onChange={(v) => setCash({ ...cash, USD: v })} />

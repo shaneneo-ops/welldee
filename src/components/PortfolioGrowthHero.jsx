@@ -30,7 +30,7 @@ function formatCompactSGD(amount, hideNumbers) {
 
 const tooltipContentStyle = {
   backgroundColor: 'var(--wd-card-bg)',
-  border: '2px dashed var(--wd-card-border)',
+  border: '2px var(--wd-border-style) var(--wd-card-border)',
   borderRadius: '1rem',
   fontFamily: 'Quicksand, sans-serif',
   color: 'var(--wd-text-heading)',

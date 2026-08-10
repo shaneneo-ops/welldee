@@ -200,19 +200,33 @@ export function PortfolioProvider({ children }) {
     }
   }
 
-  async function pastePortfolioFromClipboard() {
+  // Shared by the one-click clipboard paste and the manual textarea fallback
+  // below (some browser/webview contexts block programmatic clipboard reads
+  // — e.g. cross-app OS clipboard access from a sandboxed in-app browser —
+  // even though a normal Cmd+V into a focused textarea always works there).
+  function importPortfolioFromText(text) {
+    let data;
     try {
-      const text = await navigator.clipboard.readText();
-      const data = JSON.parse(text);
-      if (data.accounts && data.metadata) {
-        importPortfolio(data);
-        return true;
-      }
-      return false;
-    } catch (err) {
-      console.error('Failed to paste from clipboard:', err);
-      return false;
+      data = JSON.parse(text);
+    } catch {
+      return { ok: false, error: 'That text isn\'t valid JSON.' };
     }
+    if (!data.accounts || !data.metadata) {
+      return { ok: false, error: 'That JSON doesn\'t look like a Welldee portfolio export (missing accounts/metadata).' };
+    }
+    importPortfolio(data);
+    return { ok: true };
+  }
+
+  async function pastePortfolioFromClipboard() {
+    let text;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch (err) {
+      console.error('Failed to read clipboard:', err);
+      return { ok: false, error: 'This browser blocked reading the clipboard — use "Paste manually" below instead.' };
+    }
+    return importPortfolioFromText(text);
   }
 
   return (
@@ -236,6 +250,7 @@ export function PortfolioProvider({ children }) {
         hideNumbers,
         toggleHideNumbers,
         importPortfolio,
+        importPortfolioFromText,
         forceRecalculate,
         copyPortfolioToClipboard,
         pastePortfolioFromClipboard,

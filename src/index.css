@@ -32,6 +32,12 @@
 
   --wd-font-display: "Fredoka", ui-sans-serif, system-ui, sans-serif;
   --wd-font-body: "Quicksand", ui-sans-serif, system-ui, sans-serif;
+
+  /* Lets one-off inline `border: 2px var(--wd-border-style) var(--wd-card-border)`
+     styles (tooltip boxes, info panels — anywhere not using the .wd-card /
+     .wd-input classes already covered above) still switch from doodle's
+     dashed look to whimsy's solid one. */
+  --wd-border-style: dashed;
 }
 
 .light {
@@ -89,6 +95,7 @@
 
   --wd-font-display: "Quicksand", ui-sans-serif, system-ui, sans-serif;
   --wd-font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --wd-border-style: solid;
 }
 
 .whimsy.light {

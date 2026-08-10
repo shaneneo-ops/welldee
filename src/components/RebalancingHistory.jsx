@@ -27,7 +27,7 @@ function DecisionBadge({ decision }) {
   return (
     <span
       className="text-xs font-semibold px-2 py-0.5 rounded-full"
-      style={{ backgroundColor: `color-mix(in srgb, ${style.bg} 30%, var(--wd-card-bg))`, color: 'var(--wd-text-heading)', border: `1.5px dashed ${style.bg}` }}
+      style={{ backgroundColor: `color-mix(in srgb, ${style.bg} 30%, var(--wd-card-bg))`, color: 'var(--wd-text-heading)', border: `1.5px var(--wd-border-style) ${style.bg}` }}
     >
       {style.label}
     </span>
@@ -150,7 +150,7 @@ export default function RebalancingHistory() {
             <div
               key={entry.id}
               className="rounded-2xl p-3"
-              style={{ backgroundColor: 'var(--wd-card-bg-alt)', border: '2px dashed var(--wd-card-border)' }}
+              style={{ backgroundColor: 'var(--wd-card-bg-alt)', border: '2px var(--wd-border-style) var(--wd-card-border)' }}
             >
               <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
                 <div className="flex items-center gap-2 flex-wrap">

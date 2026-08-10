@@ -222,6 +222,59 @@ export function collectHoldings(portfolio) {
   return rows;
 }
 
+// Current SGD value of any non-Brokerage account (Brokerage accounts are
+// covered holding-by-holding via collectHoldings instead, since they need
+// per-ticker prices, not one lump value). Used by the Jan-1 backcalculation
+// tool to pre-fill a starting value for accounts with no ticker/share
+// model at all — CPF, bank cash, and managed portfolios.
+export function accountCurrentValueSGD(account) {
+  if (account.type === 'CPF') {
+    const { ordinary = 0, special = 0, medisave = 0 } = account.balances ?? {};
+    return ordinary + special + medisave;
+  }
+  if (account.type === 'Bank') {
+    return Object.entries(account.cash ?? {}).reduce((sum, [ccy, amt]) => sum + toSGD(amt, ccy), 0);
+  }
+  if (account.type === 'ManagedPortfolio') {
+    return toSGD(account.currentValue ?? 0, account.currency ?? 'SGD');
+  }
+  return 0;
+}
+
+// Backcalculates what net worth would have been on a given date, holding
+// today's exact shares/balances but at that date's per-holding price —
+// "same shares, back-dated price," not a reconstruction of actual trades.
+// `holdingPrices` is { [accountId::ticker]: price in the holding's own
+// currency }; `accountValues` is { [accountId]: valueSGD } for the
+// non-ticker accounts collected via accountCurrentValueSGD. Missing entries
+// in either map are simply skipped (0 contribution) — the caller decides
+// what "missing" means in the UI (e.g. block the total until filled in).
+export function computeBacktestedNetWorthSGD(portfolio, { holdingPrices = {}, accountValues = {} } = {}) {
+  let totalSGD = 0;
+
+  for (const holding of collectHoldings(portfolio)) {
+    const key = `${holding.accountId}::${holding.ticker}`;
+    const price = holdingPrices[key];
+    if (price == null) continue;
+    totalSGD += toSGD(holding.shares * price, holding.currency);
+  }
+
+  for (const account of portfolio.accounts) {
+    if (account.type === 'Brokerage') {
+      // Cash has no "price" to back-date — its current SGD amount is the
+      // Jan-1 contribution too, same principle as the non-ticker accounts.
+      for (const [ccy, amt] of Object.entries(account.cash ?? {})) {
+        totalSGD += toSGD(amt, ccy);
+      }
+      continue;
+    }
+    const value = accountValues[account.id];
+    totalSGD += value ?? 0;
+  }
+
+  return totalSGD;
+}
+
 // --- Overall P&L -------------------------------------------------------
 
 // Unrealized P&L across every priced position — brokerage holdings and

@@ -5,6 +5,7 @@ import { STORAGE_KEYS, DEFAULT_IBKR_PROXY_URL } from '../utils/constants';
 import { exportPortfolioToCSV, exportPortfolioToPDF, importPortfolioFromCSV } from '../utils/calculations';
 import TargetAllocationForm from './TargetAllocationForm';
 import { CPFForm, DBSForm, StandardCharteredForm, ManagedPortfolioForm, YTDBaselineForm } from './ManualInputForms';
+import YTDBacktestCalculator from './YTDBacktestCalculator';
 
 function Section({ title, children }) {
   return (
@@ -19,7 +20,7 @@ function InfoBox({ children }) {
   return (
     <div
       className="flex items-start gap-2 rounded-2xl p-3 text-xs wd-muted"
-      style={{ backgroundColor: 'var(--wd-card-bg-alt)', border: '2px dashed var(--wd-card-border)' }}
+      style={{ backgroundColor: 'var(--wd-card-bg-alt)', border: '2px var(--wd-border-style) var(--wd-card-border)' }}
     >
       <Info size={14} className="shrink-0 mt-0.5" />
       <div className="space-y-1">{children}</div>
@@ -81,11 +82,17 @@ function IBKRConnectionForm() {
   );
 }
 
-// Sync portfolio data across browsers/devices via clipboard.
+// Sync portfolio data across browsers/devices via clipboard. Some browser
+// contexts (notably sandboxed in-app/embedded browsers) block programmatic
+// clipboard reads even though a manual Cmd+V into a focused textarea still
+// works there — so a manual paste box is always available as a fallback,
+// not just shown after a failure.
 function ClipboardSyncForm() {
-  const { copyPortfolioToClipboard, pastePortfolioFromClipboard } = usePortfolio();
+  const { copyPortfolioToClipboard, pastePortfolioFromClipboard, importPortfolioFromText } = usePortfolio();
   const [copyMessage, setCopyMessage] = useState('');
   const [pasteMessage, setPasteMessage] = useState('');
+  const [manualText, setManualText] = useState('');
+  const [manualMessage, setManualMessage] = useState('');
 
   async function handleCopy() {
     const success = await copyPortfolioToClipboard();
@@ -99,13 +106,23 @@ function ClipboardSyncForm() {
   }
 
   async function handlePaste() {
-    const success = await pastePortfolioFromClipboard();
-    if (success) {
+    const result = await pastePortfolioFromClipboard();
+    if (result.ok) {
       setPasteMessage('Portfolio pasted ✓ — page will reload');
       setTimeout(() => location.reload(), 1500);
     } else {
-      setPasteMessage('Failed to paste — clipboard may not contain valid portfolio data');
-      setTimeout(() => setPasteMessage(''), 3000);
+      setPasteMessage(result.error);
+    }
+  }
+
+  function handleManualImport() {
+    if (!manualText.trim()) return;
+    const result = importPortfolioFromText(manualText);
+    if (result.ok) {
+      setManualMessage('Portfolio imported ✓ — page will reload');
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      setManualMessage(result.error);
     }
   }
 
@@ -133,6 +150,21 @@ function ClipboardSyncForm() {
 
       {copyMessage && <p className="wd-subtle">{copyMessage}</p>}
       {pasteMessage && <p className="wd-subtle">{pasteMessage}</p>}
+
+      <div className="pt-1">
+        <label className="wd-label">Paste didn't work? Paste manually instead</label>
+        <textarea
+          value={manualText}
+          onChange={(e) => setManualText(e.target.value)}
+          placeholder="Cmd+V / Ctrl+V the copied portfolio JSON here"
+          rows={4}
+          className="wd-input font-mono text-xs"
+        />
+        <button onClick={handleManualImport} className="wd-btn-secondary w-full mt-2">
+          Import pasted text
+        </button>
+        {manualMessage && <p className="wd-subtle mt-1">{manualMessage}</p>}
+      </div>
     </div>
   );
 }
@@ -256,7 +288,7 @@ export default function SettingsPanel({ onClose }) {
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
         className="relative w-full max-w-md h-full shadow-xl overflow-y-auto"
-        style={{ backgroundColor: 'var(--wd-bg)', borderLeft: '2px dashed var(--wd-card-border)' }}
+        style={{ backgroundColor: 'var(--wd-bg)', borderLeft: '2px var(--wd-border-style) var(--wd-card-border)' }}
       >
         <div
           className="flex items-center justify-between px-5 py-4 border-b-2 wd-divider sticky top-0 z-10"
@@ -293,6 +325,10 @@ export default function SettingsPanel({ onClose }) {
 
           <Section title="Managed Portfolios (Endowus, iFAST, ...)">
             <ManagedPortfolioForm />
+          </Section>
+
+          <Section title="Backcalculate Jan 1 Value">
+            <YTDBacktestCalculator />
           </Section>
 
           <Section title="YTD Return Baseline">
