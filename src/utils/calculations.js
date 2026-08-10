@@ -382,28 +382,6 @@ export function computeDividendPayments(portfolio, { year } = {}) {
   return { totalSGD, entries };
 }
 
-// Forward-looking projection from each position's trailing yield: annual
-// dividend = value * yield%. Positions/accounts without a dividendYieldPct
-// are skipped (not treated as zero-yield), so this only reflects what's
-// known. This is a projection, not a "so far" figure — see
-// computeDividendPayments() for actual payments received.
-export function computeProjectedAnnualDividends(portfolio) {
-  let annualSGD = 0;
-
-  for (const holding of collectHoldings(portfolio)) {
-    if (holding.dividendYieldPct == null) continue;
-    annualSGD += holding.currentValueSGD * (holding.dividendYieldPct / 100);
-  }
-
-  for (const account of portfolio.accounts) {
-    if (account.type !== 'ManagedPortfolio' || account.dividendYieldPct == null) continue;
-    const valueSGD = toSGD(account.currentValue ?? 0, account.currency ?? 'SGD');
-    annualSGD += valueSGD * (account.dividendYieldPct / 100);
-  }
-
-  return annualSGD;
-}
-
 // Given dates sorted newest-first, projects a next date by repeating the
 // gap between the two most recent ones — shared by the ManagedPortfolio
 // (from logged dividendPayments) and ticker (from real dividend history)

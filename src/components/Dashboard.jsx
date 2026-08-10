@@ -2,7 +2,6 @@ import { useState } from 'react';
 import PortfolioGrowthHero from './PortfolioGrowthHero';
 import YourGoals from './YourGoals';
 import YTDReturnCard from './YTDReturnCard';
-import DividendsCard from './DividendsCard';
 import UnrealizedPnLCard from './UnrealizedPnLCard';
 import AssetAllocationChart from './AssetAllocationChart';
 import GeographyIndustryBreakdown from './GeographyIndustryBreakdown';
@@ -35,11 +34,12 @@ export default function Dashboard() {
       <PortfolioGrowthHero />
       <YourGoals />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <UnrealizedPnLCard />
         <YTDReturnCard />
-        <DividendsCard />
       </div>
+
+      <IncomeAnalytics />
 
       <AssetAllocationChart industryFilter={industryFilter} />
       <GeographyIndustryBreakdown
@@ -50,7 +50,6 @@ export default function Dashboard() {
       <HoldingsTable industryFilter={industryFilter} onClearIndustryFilter={() => setIndustryFilter(null)} />
       <DividendLog />
       <DividendCalendar />
-      <IncomeAnalytics />
       <RebalanceAlert />
       <RebalancingHistory />
     </main>
