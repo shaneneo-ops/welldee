@@ -3,6 +3,7 @@ import { STORAGE_KEYS } from '../utils/constants';
 import { loadJSON, saveJSON } from '../utils/storage';
 import { defaultPortfolio } from '../utils/defaultPortfolio';
 import { syncIBKRAccount } from '../services/ibkrService';
+import { fetchCurrentPrice } from '../services/currentPriceService';
 import { computeNetWorth } from '../utils/calculations';
 
 const PortfolioContext = createContext(null);
@@ -15,6 +16,12 @@ export function PortfolioProvider({ children }) {
     loadJSON(STORAGE_KEYS.IBKR_CACHE, { source: null, syncedAt: null, error: null })
   );
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncingPrices, setIsSyncingPrices] = useState(false);
+  const [priceSyncStatus, setPriceSyncStatus] = useState({ syncedAt: null, updated: 0, failed: [] });
+  // Bumped by syncMarketData() so DividendCalendar/IncomeAnalytics know to
+  // re-fetch their Yahoo data on "Sync Now" — those components otherwise
+  // only fetch once on mount.
+  const [dataRefreshKey, setDataRefreshKey] = useState(0);
   // Excludes CPF accounts from every calculation (net worth, allocation
   // chart, holdings, rebalancing) app-wide — not a display mask. See
   // computeAllocationByClass in calculations.js for where this plugs in.
@@ -167,6 +174,43 @@ export function PortfolioProvider({ children }) {
     }
   }
 
+  // What the Header's "Sync Now" button actually calls: refreshes live
+  // prices for every real market ticker held (Standard Chartered, DBS —
+  // whatever's actually funded), and separately bumps dataRefreshKey so the
+  // Dividend Calendar / Income Analytics re-fetch their Yahoo data too.
+  // Distinct from syncIBKR above, which is IBKR-specific and needs a local
+  // proxy + gateway — still reachable from Settings' IBKR Connection
+  // section for anyone who actually has an IBKR account connected.
+  async function syncMarketData() {
+    setIsSyncingPrices(true);
+    const holdings = portfolio.accounts.flatMap((a) =>
+      a.type === 'Brokerage' ? (a.holdings ?? []).map((h) => ({ accountId: a.id, ticker: h.ticker })) : []
+    );
+
+    let updated = 0;
+    const failed = [];
+    await Promise.all(
+      holdings.map(async ({ accountId, ticker }) => {
+        const result = await fetchCurrentPrice(ticker);
+        if (result.ok) {
+          updateAccount(accountId, (acc) => ({
+            ...acc,
+            holdings: acc.holdings.map((h) =>
+              h.ticker === ticker ? { ...h, currentPrice: result.price, lastUpdated: new Date().toISOString() } : h
+            ),
+          }));
+          updated += 1;
+        } else {
+          failed.push(ticker);
+        }
+      })
+    );
+
+    setPriceSyncStatus({ syncedAt: new Date().toISOString(), updated, failed });
+    setDataRefreshKey((k) => k + 1);
+    setIsSyncingPrices(false);
+  }
+
   function importPortfolio(newPortfolio) {
     setPortfolio({
       ...newPortfolio,
@@ -240,6 +284,10 @@ export function PortfolioProvider({ children }) {
         syncIBKR,
         isSyncing,
         syncStatus,
+        syncMarketData,
+        isSyncingPrices,
+        priceSyncStatus,
+        dataRefreshKey,
         excludeCPF,
         toggleExcludeCPF,
         hideNumbers,

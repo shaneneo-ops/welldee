@@ -30,14 +30,16 @@ const tooltipContentStyle = {
 // fetch/degrade pattern as DividendCalendar.jsx — a Yahoo outage just means
 // that ticker contributes nothing to the total, not a broken page.
 export default function IncomeAnalytics() {
-  const { portfolio, hideNumbers } = usePortfolio();
+  const { portfolio, hideNumbers, dataRefreshKey } = usePortfolio();
   const [holdings] = useState(() => collectHoldings(portfolio));
   const [tickers] = useState(() => [...new Set(holdings.map((h) => h.ticker))]);
   const [fetchedDividendHistory, setFetchedDividendHistory] = useState({});
   const [loading, setLoading] = useState(tickers.length > 0);
 
+  // Re-fetches whenever "Sync Now" bumps dataRefreshKey, not just on mount.
   useEffect(() => {
     if (tickers.length === 0) return;
+    setLoading(true);
     let remaining = tickers.length;
     tickers.forEach(async (ticker) => {
       const result = await fetchDividendHistory(ticker);
@@ -46,7 +48,7 @@ export default function IncomeAnalytics() {
       if (remaining === 0) setLoading(false);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [dataRefreshKey]);
 
   const { totalSGD, manualManagedTotalSGD, byMonth } = computeYTDDividendIncome(portfolio, { fetchedDividendHistory });
   const yieldOnCost = computeYieldOnCostByHolding(portfolio);

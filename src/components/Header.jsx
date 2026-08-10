@@ -1,8 +1,8 @@
+import { useEffect, useState } from 'react';
 import { RefreshCw, Settings, LogOut, EyeOff, Eye, Filter, FilterX, Moon, Sun, Sparkles, PenTool } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { usePortfolio } from '../context/PortfolioContext';
 import { useTheme } from '../context/ThemeContext';
-import { STORAGE_KEYS, DEFAULT_IBKR_PROXY_URL } from '../utils/constants';
 import Clock from './Clock';
 
 function formatTimestamp(iso) {
@@ -13,9 +13,44 @@ function formatTimestamp(iso) {
   });
 }
 
+// Pulls live prices for real market tickers (Standard Chartered, DBS — no
+// IBKR account is actually funded, see Settings' IBKR Connection section
+// for that separate path) and refreshes the Dividend Calendar/Income
+// Analytics Yahoo data. Result flashes on the button itself for a few
+// seconds — this used to fail completely silently (IBKR sync with no local
+// proxy running), which is exactly why it "felt broken."
+function SyncButton({ syncMarketData, isSyncingPrices, priceSyncStatus }) {
+  const [justSynced, setJustSynced] = useState(false);
+
+  useEffect(() => {
+    if (!priceSyncStatus.syncedAt) return;
+    setJustSynced(true);
+    const t = setTimeout(() => setJustSynced(false), 4000);
+    return () => clearTimeout(t);
+  }, [priceSyncStatus.syncedAt]);
+
+  const hasFailures = priceSyncStatus.failed.length > 0;
+  const title = priceSyncStatus.syncedAt
+    ? `Last synced ${new Date(priceSyncStatus.syncedAt).toLocaleTimeString('en-SG')} — ${priceSyncStatus.updated} price${priceSyncStatus.updated === 1 ? '' : 's'} updated${hasFailures ? `, ${priceSyncStatus.failed.length} couldn't be looked up (${priceSyncStatus.failed.join(', ')})` : ''}`
+    : 'Refresh live prices for your holdings and the Dividend Calendar';
+
+  let label = 'Sync Now';
+  if (isSyncingPrices) label = 'Syncing...';
+  else if (justSynced) label = hasFailures ? `Synced (${priceSyncStatus.failed.length} failed)` : 'Synced ✓';
+
+  return (
+    <button onClick={syncMarketData} disabled={isSyncingPrices} className="wd-btn-toggle" title={title}>
+      <RefreshCw size={14} className={isSyncingPrices ? 'animate-spin' : ''} />
+      <span className="hidden sm:inline" style={hasFailures && justSynced ? { color: 'var(--wd-negative)' } : undefined}>
+        {label}
+      </span>
+    </button>
+  );
+}
+
 export default function Header({ onOpenSettings }) {
   const { logout } = useAuth();
-  const { portfolio, syncIBKR, isSyncing, excludeCPF, toggleExcludeCPF, hideNumbers, toggleHideNumbers } = usePortfolio();
+  const { portfolio, syncMarketData, isSyncingPrices, priceSyncStatus, excludeCPF, toggleExcludeCPF, hideNumbers, toggleHideNumbers } = usePortfolio();
   const { theme, toggleTheme, themeFamily, toggleThemeFamily } = useTheme();
   const isWhimsy = themeFamily === 'whimsy';
 
@@ -82,10 +117,7 @@ export default function Header({ onOpenSettings }) {
             <span className="hidden sm:inline">{excludeCPF ? 'CPF Excluded' : 'Exclude CPF'}</span>
           </button>
 
-          <button onClick={() => syncIBKR(loadedProxyUrl())} disabled={isSyncing} className="wd-btn-toggle" title="Sync IBKR account data">
-            <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
-            <span className="hidden sm:inline">{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
-          </button>
+          <SyncButton syncMarketData={syncMarketData} isSyncingPrices={isSyncingPrices} priceSyncStatus={priceSyncStatus} />
 
           <button onClick={onOpenSettings} className="wd-btn-toggle" aria-label="Settings">
             <Settings size={14} />
@@ -99,14 +131,4 @@ export default function Header({ onOpenSettings }) {
       </div>
     </header>
   );
-}
-
-// Proxy URL lives in localStorage (see SettingsPanel); read directly here to
-// avoid threading it through every component that can trigger a sync.
-function loadedProxyUrl() {
-  try {
-    return localStorage.getItem(STORAGE_KEYS.IBKR_PROXY_URL) ?? DEFAULT_IBKR_PROXY_URL;
-  } catch {
-    return DEFAULT_IBKR_PROXY_URL;
-  }
 }

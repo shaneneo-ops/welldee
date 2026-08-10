@@ -37,7 +37,7 @@ function IBKRConnectionForm() {
     () => localStorage.getItem(STORAGE_KEYS.IBKR_PROXY_URL) ?? DEFAULT_IBKR_PROXY_URL
   );
   const [saved, setSaved] = useState(false);
-  const { syncStatus } = usePortfolio();
+  const { syncStatus, syncIBKR, isSyncing } = usePortfolio();
 
   function save() {
     localStorage.setItem(STORAGE_KEYS.IBKR_PROXY_URL, proxyUrl);
@@ -53,7 +53,11 @@ function IBKRConnectionForm() {
           <li>IBKR's Client Portal Gateway, logged in at https://localhost:5000</li>
           <li>This app's proxy: <code className="px-1 rounded" style={{ backgroundColor: 'var(--wd-card-bg)' }}>npm run server</code></li>
         </ol>
-        <p>Then hit Sync Now. See README "IBKR setup" for details.</p>
+        <p>
+          This is separate from the header's "Sync Now", which refreshes live prices for your Standard
+          Chartered/DBS holdings instead — this section only matters if you have an actual IBKR account to
+          connect. See README "IBKR setup" for details.
+        </p>
       </InfoBox>
       <div>
         <label className="wd-label">Proxy URL</label>
@@ -65,9 +69,14 @@ function IBKRConnectionForm() {
           className="wd-input"
         />
       </div>
-      <button onClick={save} className="wd-btn-primary">
-        {saved ? 'Saved ✓' : 'Save proxy URL'}
-      </button>
+      <div className="flex gap-2 flex-wrap">
+        <button onClick={save} className="wd-btn-primary w-auto px-4">
+          {saved ? 'Saved ✓' : 'Save proxy URL'}
+        </button>
+        <button onClick={() => syncIBKR(proxyUrl)} disabled={isSyncing} className="wd-btn-secondary w-auto px-4">
+          {isSyncing ? 'Syncing...' : 'Sync IBKR Now'}
+        </button>
+      </div>
 
       <div className="wd-subtle pt-1">
         <p>

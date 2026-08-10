@@ -38,7 +38,7 @@ function SourceBadge({ source }) {
 // YTDBacktestCalculator.jsx, so a Yahoo outage degrades this section
 // gracefully rather than blocking the page.
 export default function DividendCalendar() {
-  const { portfolio } = usePortfolio();
+  const { portfolio, dataRefreshKey } = usePortfolio();
   const [holdings] = useState(() => collectHoldings(portfolio));
   const [tickers] = useState(() => [...new Set(holdings.map((h) => h.ticker))]);
 
@@ -46,7 +46,10 @@ export default function DividendCalendar() {
   const [fetchedDividendHistory, setFetchedDividendHistory] = useState({});
   const [status, setStatus] = useState(() => Object.fromEntries(tickers.map((t) => [t, 'loading'])));
 
+  // Re-fetches whenever "Sync Now" bumps dataRefreshKey, not just on mount —
+  // otherwise this data would go stale for the rest of the session.
   useEffect(() => {
+    setStatus(Object.fromEntries(tickers.map((t) => [t, 'loading'])));
     tickers.forEach(async (ticker) => {
       const [calendarResult, historyResult] = await Promise.all([fetchDividendCalendar(ticker), fetchDividendHistory(ticker)]);
       if (calendarResult.ok) setFetchedCalendarData((prev) => ({ ...prev, [ticker]: calendarResult }));
@@ -54,7 +57,7 @@ export default function DividendCalendar() {
       setStatus((prev) => ({ ...prev, [ticker]: calendarResult.ok || historyResult.ok ? 'resolved' : 'failed' }));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [dataRefreshKey]);
 
   const entries = computeDividendCalendar(portfolio, { fetchedCalendarData, fetchedDividendHistory });
   const upcoming = filterUpcomingWithinDays(entries, DIVIDEND_ALERT_WINDOW_DAYS);
