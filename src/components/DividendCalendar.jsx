@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { usePortfolio } from '../context/PortfolioContext';
 import { collectHoldings, computeDividendCalendar, filterUpcomingWithinDays } from '../utils/calculations';
 import { fetchDividendCalendar } from '../services/dividendCalendarService';
+import { fetchDividendHistory } from '../services/dividendHistoryService';
 import { DIVIDEND_ALERT_WINDOW_DAYS } from '../utils/constants';
 
 function formatDate(iso) {
@@ -27,10 +28,13 @@ function SourceBadge({ source }) {
 }
 
 // Real market tickers get their ex-div/payment dates auto-fetched from
-// Yahoo (see api/dividendCalendar.js); managed portfolios (Endowus, iFAST —
-// no resolvable ticker) get a next-payment projection purely from the gap
-// between their two most recent logged Dividend Log entries. One fetch per
-// unique brokerage ticker, same loading/resolved/failed pattern as
+// Yahoo (see api/dividendCalendar.js). When that has nothing for a ticker
+// (confirmed live: several SGX ETFs return no forward-looking data at all),
+// this falls back to a cadence projection from that ticker's real dividend
+// payment history (api/dividendHistory.js) instead. Managed portfolios
+// (Endowus, iFAST — no resolvable ticker at all) get the same cadence
+// treatment from their logged Dividend Log entries. One fetch of each kind
+// per unique brokerage ticker, same loading/resolved/failed pattern as
 // YTDBacktestCalculator.jsx, so a Yahoo outage degrades this section
 // gracefully rather than blocking the page.
 export default function DividendCalendar() {
@@ -39,22 +43,20 @@ export default function DividendCalendar() {
   const [tickers] = useState(() => [...new Set(holdings.map((h) => h.ticker))]);
 
   const [fetchedCalendarData, setFetchedCalendarData] = useState({});
+  const [fetchedDividendHistory, setFetchedDividendHistory] = useState({});
   const [status, setStatus] = useState(() => Object.fromEntries(tickers.map((t) => [t, 'loading'])));
 
   useEffect(() => {
     tickers.forEach(async (ticker) => {
-      const result = await fetchDividendCalendar(ticker);
-      if (result.ok) {
-        setFetchedCalendarData((prev) => ({ ...prev, [ticker]: result }));
-        setStatus((prev) => ({ ...prev, [ticker]: 'resolved' }));
-      } else {
-        setStatus((prev) => ({ ...prev, [ticker]: 'failed' }));
-      }
+      const [calendarResult, historyResult] = await Promise.all([fetchDividendCalendar(ticker), fetchDividendHistory(ticker)]);
+      if (calendarResult.ok) setFetchedCalendarData((prev) => ({ ...prev, [ticker]: calendarResult }));
+      if (historyResult.ok) setFetchedDividendHistory((prev) => ({ ...prev, [ticker]: historyResult.dividends }));
+      setStatus((prev) => ({ ...prev, [ticker]: calendarResult.ok || historyResult.ok ? 'resolved' : 'failed' }));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const entries = computeDividendCalendar(portfolio, { fetchedCalendarData });
+  const entries = computeDividendCalendar(portfolio, { fetchedCalendarData, fetchedDividendHistory });
   const upcoming = filterUpcomingWithinDays(entries, DIVIDEND_ALERT_WINDOW_DAYS);
   const stillLoading = Object.values(status).some((s) => s === 'loading');
 

@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { usePortfolio } from '../context/PortfolioContext';
-import { computeMonthlyDividendTotals, computeYieldOnCostByHolding } from '../utils/calculations';
+import { collectHoldings, computeYTDDividendIncome, computeYieldOnCostByHolding } from '../utils/calculations';
+import { fetchDividendHistory } from '../services/dividendHistoryService';
 
 function formatSGD(amount, hideNumbers) {
   if (hideNumbers) return '••••••';
@@ -20,21 +22,58 @@ const tooltipContentStyle = {
   color: 'var(--wd-text-heading)',
 };
 
+// The headline YTD figure is calculated, not manually logged: today's share
+// count × every real per-share payout that's gone ex-div this year, fetched
+// per ticker from api/dividendHistory.js (see computeYTDDividendIncome).
+// Managed portfolios (Endowus/iFAST, no resolvable ticker) fall back to
+// whatever's logged in the Dividend Log for that account. Same
+// fetch/degrade pattern as DividendCalendar.jsx — a Yahoo outage just means
+// that ticker contributes nothing to the total, not a broken page.
 export default function IncomeAnalytics() {
   const { portfolio, hideNumbers } = usePortfolio();
-  const monthly = computeMonthlyDividendTotals(portfolio);
+  const [holdings] = useState(() => collectHoldings(portfolio));
+  const [tickers] = useState(() => [...new Set(holdings.map((h) => h.ticker))]);
+  const [fetchedDividendHistory, setFetchedDividendHistory] = useState({});
+  const [loading, setLoading] = useState(tickers.length > 0);
+
+  useEffect(() => {
+    if (tickers.length === 0) return;
+    let remaining = tickers.length;
+    tickers.forEach(async (ticker) => {
+      const result = await fetchDividendHistory(ticker);
+      if (result.ok) setFetchedDividendHistory((prev) => ({ ...prev, [ticker]: result.dividends }));
+      remaining -= 1;
+      if (remaining === 0) setLoading(false);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const { totalSGD, manualManagedTotalSGD, byMonth } = computeYTDDividendIncome(portfolio, { fetchedDividendHistory });
   const yieldOnCost = computeYieldOnCostByHolding(portfolio);
-  const hasAnyIncome = monthly.some((m) => m.totalSGD > 0);
+  const hasAnyIncome = byMonth.some((m) => m.totalSGD > 0);
 
   return (
     <div className="wd-card">
       <span className="wd-emoji-badge" aria-hidden="true">📈</span>
-      <p className="wd-card-title mb-3">Income Analytics</p>
+      <div className="flex items-center justify-between mb-1 gap-3 flex-wrap">
+        <p className="wd-card-title mb-0">Income Analytics</p>
+        {!loading && (
+          <p className="text-sm font-semibold" style={{ color: 'var(--wd-text-heading)' }}>
+            {formatSGD(totalSGD, hideNumbers)} received YTD
+          </p>
+        )}
+      </div>
+      <p className="wd-subtle mb-3">
+        Calculated from your current shares × real per-share payouts this year
+        {manualManagedTotalSGD > 0 ? ', plus manually logged managed-portfolio payments below.' : '.'}
+      </p>
 
-      {hasAnyIncome ? (
+      {loading ? (
+        <p className="wd-muted py-8 text-center text-sm">Looking up this year's dividend payments…</p>
+      ) : hasAnyIncome ? (
         <div className="h-56 -mx-2">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={monthly} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
+            <BarChart data={byMonth} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid stroke="var(--wd-card-border)" strokeDasharray="4 4" vertical={false} />
               <XAxis
                 dataKey="month"
@@ -59,7 +98,8 @@ export default function IncomeAnalytics() {
         </div>
       ) : (
         <p className="wd-muted py-8 text-center text-sm">
-          No dividends logged this year yet — entries added in the Dividend Log below will show up here by month.
+          No dividends paid out yet this year on your current holdings, and nothing logged for managed portfolios in
+          the Dividend Log below.
         </p>
       )}
 

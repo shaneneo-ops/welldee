@@ -404,59 +404,92 @@ export function computeProjectedAnnualDividends(portfolio) {
   return annualSGD;
 }
 
-// Upcoming ex-dividend/payment dates, sorted soonest-first. `fetchedCalendarData`
-// is `{ [ticker]: { exDividendDate, paymentDate, trailingDividendRate,
-// trailingDividendYieldPct } }` assembled by the caller from live
-// /api/dividendCalendar lookups (real market tickers only — see
-// DividendCalendar.jsx). Each row is tagged `source: 'yahoo'` when backed by
-// that real data, or `'cadence'` when projected purely from the gap between
-// the two most recent logged `dividendPayments` for a ManagedPortfolio
-// account (Endowus/iFAST etc — these never have a resolvable ticker).
-// Accounts with fewer than 2 logged payments are omitted rather than given a
+// Given dates sorted newest-first, projects a next date by repeating the
+// gap between the two most recent ones — shared by the ManagedPortfolio
+// (from logged dividendPayments) and ticker (from real dividend history)
+// cadence fallbacks in computeDividendCalendar below. Returns null if there
+// are fewer than 2 dates, or the two most recent are out of order/identical.
+function projectNextDate(datesNewestFirst) {
+  if (datesNewestFirst.length < 2) return null;
+  const [latest, prior] = datesNewestFirst;
+  const intervalDays = Math.round((new Date(latest) - new Date(prior)) / (1000 * 60 * 60 * 24));
+  if (intervalDays <= 0) return null;
+  const projected = new Date(latest);
+  projected.setDate(projected.getDate() + intervalDays);
+  return projected.toISOString().slice(0, 10);
+}
+
+// Upcoming ex-dividend/payment dates, sorted soonest-first.
+// `fetchedCalendarData` is `{ [ticker]: {exDividendDate, paymentDate,
+// trailingDividendRate, trailingDividendYieldPct} }` from live
+// /api/dividendCalendar lookups. `fetchedDividendHistory` is
+// `{ [ticker]: [{date, amountPerShare}] }` from /api/dividendHistory,
+// sorted oldest-first — used as a cadence fallback when Yahoo's
+// quoteSummary has no forward-looking date for a ticker (confirmed live:
+// several SGX ETFs return nothing from calendarEvents/summaryDetail but do
+// have real payment history). Rows are tagged `source: 'yahoo'` when backed
+// by a real confirmed date, or `'cadence'` when projected from the gap
+// between the two most recent known payments (either a ticker's real
+// history, or — for ManagedPortfolio accounts with no resolvable ticker,
+// e.g. Endowus/iFAST — the two most recent logged `dividendPayments`).
+// Anything with fewer than 2 known payments is omitted rather than given a
 // fabricated date. CPF/Bank accounts never appear (no dividend concept).
-export function computeDividendCalendar(portfolio, { fetchedCalendarData = {} } = {}) {
+export function computeDividendCalendar(portfolio, { fetchedCalendarData = {}, fetchedDividendHistory = {} } = {}) {
   const rows = [];
   const today = new Date().toISOString().slice(0, 10);
 
   for (const holding of collectHoldings(portfolio)) {
     const data = fetchedCalendarData[holding.ticker];
-    if (!data) continue;
     // Yahoo returns the *last known* ex-div date even for stocks that
     // haven't paid one in years (verified live: a thin small-cap returned a
     // 2021 date) — only a today-or-later date is actually "upcoming".
-    const hasFutureDate = (data.exDividendDate && data.exDividendDate >= today) || (data.paymentDate && data.paymentDate >= today);
-    if (!hasFutureDate) continue;
+    const hasFutureDate = data && ((data.exDividendDate && data.exDividendDate >= today) || (data.paymentDate && data.paymentDate >= today));
+
+    if (hasFutureDate) {
+      rows.push({
+        accountId: holding.accountId,
+        ticker: holding.ticker,
+        label: `${holding.broker} — ${holding.ticker}`,
+        exDividendDate: data.exDividendDate,
+        paymentDate: data.paymentDate,
+        trailingDividendRate: data.trailingDividendRate,
+        trailingDividendYieldPct: data.trailingDividendYieldPct,
+        source: 'yahoo',
+      });
+      continue;
+    }
+
+    const events = fetchedDividendHistory[holding.ticker];
+    const projected = events ? projectNextDate([...events].map((e) => e.date).sort().reverse()) : null;
+    if (!projected) continue;
     rows.push({
       accountId: holding.accountId,
       ticker: holding.ticker,
       label: `${holding.broker} — ${holding.ticker}`,
-      exDividendDate: data.exDividendDate,
-      paymentDate: data.paymentDate,
-      trailingDividendRate: data.trailingDividendRate,
-      trailingDividendYieldPct: data.trailingDividendYieldPct,
-      source: 'yahoo',
+      exDividendDate: null,
+      paymentDate: projected,
+      trailingDividendRate: null,
+      trailingDividendYieldPct: data?.trailingDividendYieldPct ?? null,
+      source: 'cadence',
     });
   }
 
   for (const account of portfolio.accounts) {
     if (account.type !== 'ManagedPortfolio') continue;
-    const payments = (portfolio.dividendPayments ?? [])
+    const paymentDates = (portfolio.dividendPayments ?? [])
       .filter((p) => p.accountId === account.id)
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
-    if (payments.length < 2) continue;
-
-    const [latest, prior] = payments;
-    const intervalDays = Math.round((new Date(latest.date) - new Date(prior.date)) / (1000 * 60 * 60 * 24));
-    if (intervalDays <= 0) continue;
-    const projectedDate = new Date(latest.date);
-    projectedDate.setDate(projectedDate.getDate() + intervalDays);
+      .map((p) => p.date)
+      .sort()
+      .reverse();
+    const projected = projectNextDate(paymentDates);
+    if (!projected) continue;
 
     rows.push({
       accountId: account.id,
       ticker: null,
       label: `${account.provider ? account.provider + ' — ' : ''}${account.portfolioName ?? account.id}`,
       exDividendDate: null,
-      paymentDate: projectedDate.toISOString().slice(0, 10),
+      paymentDate: projected,
       trailingDividendRate: null,
       trailingDividendYieldPct: account.dividendYieldPct ?? null,
       source: 'cadence',
@@ -486,35 +519,64 @@ export function filterUpcomingWithinDays(calendarEntries, days) {
   });
 }
 
-// Real logged dividend payments (portfolio.dividendPayments), grouped by
-// calendar month for the requested year (default: this year) — backs the
-// Income Analytics bar chart. Returns 12 entries (Jan-Dec) even for months
-// with no payments, so the chart always has a full x-axis.
-export function computeMonthlyDividendTotals(portfolio, { year } = {}) {
-  const targetYear = year ?? new Date().getFullYear();
-  const totals = Array.from({ length: 12 }, () => 0);
+// Real YTD dividend income: for each brokerage holding, today's share
+// count × every real per-share payout that's actually gone ex-div this
+// year (`fetchedDividendHistory`, from /api/dividendHistory) — "same
+// shares" methodology, matching how this app's Jan-1 backcalculation
+// already treats today's holdings as constant rather than reconstructing
+// trades during the year. ManagedPortfolio accounts (Endowus/iFAST) have
+// no ticker to fetch a real history for, so they fall back to whatever's
+// logged manually in the Dividend Log for that account — logged entries
+// against a brokerage ticker are NOT added on top, since those are already
+// covered by the calculated figure and would double-count.
+// Returns { totalSGD, manualManagedTotalSGD, byMonth (12 entries,
+// Jan-Dec), byHolding } for the Income Analytics card.
+export function computeYTDDividendIncome(portfolio, { fetchedDividendHistory = {} } = {}) {
+  const targetYear = new Date().getFullYear();
+  const monthTotals = Array.from({ length: 12 }, () => 0);
+  const byHolding = [];
+  let totalSGD = 0;
 
+  for (const holding of collectHoldings(portfolio)) {
+    const events = fetchedDividendHistory[holding.ticker];
+    if (!events || events.length === 0) continue;
+    let holdingTotalSGD = 0;
+    for (const event of events) {
+      const amountSGD = toSGD(event.amountPerShare * holding.shares, holding.currency);
+      holdingTotalSGD += amountSGD;
+      monthTotals[new Date(event.date).getMonth()] += amountSGD;
+    }
+    totalSGD += holdingTotalSGD;
+    byHolding.push({
+      accountId: holding.accountId,
+      ticker: holding.ticker,
+      label: `${holding.broker} — ${holding.ticker}`,
+      shares: holding.shares,
+      totalSGD: holdingTotalSGD,
+    });
+  }
+
+  let manualManagedTotalSGD = 0;
   for (const payment of portfolio.dividendPayments ?? []) {
+    const account = portfolio.accounts.find((a) => a.id === payment.accountId);
+    if (account?.type !== 'ManagedPortfolio') continue;
     const d = new Date(payment.date);
     if (d.getFullYear() !== targetYear) continue;
-    totals[d.getMonth()] += toSGD(payment.amount, payment.currency);
+    const amountSGD = toSGD(payment.amount, payment.currency);
+    manualManagedTotalSGD += amountSGD;
+    monthTotals[d.getMonth()] += amountSGD;
   }
+  totalSGD += manualManagedTotalSGD;
 
-  return totals.map((totalSGD, i) => ({
-    month: new Date(targetYear, i, 1).toLocaleDateString('en-SG', { month: 'short' }),
+  return {
     totalSGD,
-  }));
-}
-
-// Real logged dividend payments, grouped by calendar year — same source as
-// computeMonthlyDividendTotals, just summed at year granularity instead.
-export function computeYearlyDividendTotals(portfolio) {
-  const totals = new Map();
-  for (const payment of portfolio.dividendPayments ?? []) {
-    const year = new Date(payment.date).getFullYear();
-    totals.set(year, (totals.get(year) ?? 0) + toSGD(payment.amount, payment.currency));
-  }
-  return [...totals.entries()].sort(([a], [b]) => a - b).map(([year, totalSGD]) => ({ year, totalSGD }));
+    manualManagedTotalSGD,
+    byMonth: monthTotals.map((t, i) => ({
+      month: new Date(targetYear, i, 1).toLocaleDateString('en-SG', { month: 'short' }),
+      totalSGD: t,
+    })),
+    byHolding: byHolding.sort((a, b) => b.totalSGD - a.totalSGD),
+  };
 }
 
 // Yield on cost per brokerage holding: today's dividend yield against what
