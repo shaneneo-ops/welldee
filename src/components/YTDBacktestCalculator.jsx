@@ -151,7 +151,7 @@ export default function YTDBacktestCalculator() {
           </p>
           {missingCount > 0 && (
             <p className="wd-subtle" style={{ color: 'var(--wd-negative)' }}>
-              {missingCount} row{missingCount === 1 ? '' : 's'} still need a price
+              {missingCount} row{missingCount === 1 ? '' : 's'} still {missingCount === 1 ? 'needs' : 'need'} a price
             </p>
           )}
         </div>
