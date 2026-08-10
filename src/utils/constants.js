@@ -25,6 +25,10 @@ export const REBALANCE_THRESHOLD = 0.05;
 // the most recent logged entry against this.
 export const REBALANCE_MIN_INTERVAL_DAYS = 90;
 
+// How close an ex-dividend/payment date has to be to show the Dividend
+// Calendar's alert banner. Fixed for now rather than a Settings toggle.
+export const DIVIDEND_ALERT_WINDOW_DAYS = 7;
+
 // Still a hardcoded snapshot, not a live fetch (see README "Known
 // Limitations" — automating this is the one open item there). Updated by
 // hand to the market rate as of 2026-07-29 (~1.292, per XE/Investing.com).

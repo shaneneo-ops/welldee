@@ -8,15 +8,7 @@
 // designed to degrade to "the caller shows a manual-entry field," never to
 // crash the page that called it.
 
-// Our ticker format -> Yahoo's. SGX-listed holdings are entered as `X.SG`
-// here but Yahoo lists them under the `.SI` suffix; US tickers are entered
-// as `X.US` but Yahoo has no suffix for the primary US listing. Anything
-// else passes through unchanged (best effort, not a guarantee of a match).
-function toYahooTicker(ticker) {
-  if (ticker.endsWith('.SG')) return ticker.slice(0, -3) + '.SI';
-  if (ticker.endsWith('.US')) return ticker.slice(0, -3);
-  return ticker;
-}
+import { toYahooTicker } from './_lib/toYahooTicker.js';
 
 export default async function handler(req, res) {
   const { ticker, date } = req.query;

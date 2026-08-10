@@ -8,6 +8,8 @@ import AssetAllocationChart from './AssetAllocationChart';
 import GeographyIndustryBreakdown from './GeographyIndustryBreakdown';
 import HoldingsTable from './HoldingsTable';
 import DividendLog from './DividendLog';
+import DividendCalendar from './DividendCalendar';
+import IncomeAnalytics from './IncomeAnalytics';
 import RebalanceAlert from './RebalanceAlert';
 import RebalancingHistory from './RebalancingHistory';
 
@@ -47,6 +49,8 @@ export default function Dashboard() {
       />
       <HoldingsTable industryFilter={industryFilter} onClearIndustryFilter={() => setIndustryFilter(null)} />
       <DividendLog />
+      <DividendCalendar />
+      <IncomeAnalytics />
       <RebalanceAlert />
       <RebalancingHistory />
     </main>
