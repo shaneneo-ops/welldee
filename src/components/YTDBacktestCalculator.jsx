@@ -28,15 +28,29 @@ function formatMoney(n) {
 // any ticker lookup that fails (thin/delisted/obscure) degrades to the same
 // manual field rather than blocking the rest.
 export default function YTDBacktestCalculator() {
-  const { portfolio, setStartOfYearValue } = usePortfolio();
+  const { portfolio, setStartOfYearValue, setYTDBacktestInputs } = usePortfolio();
   const [holdings] = useState(() => collectHoldings(portfolio));
   const [nonTickerAccounts] = useState(() => portfolio.accounts.filter((a) => a.type !== 'Brokerage'));
+  // Seed from whatever was saved last time, so leaving Settings (or
+  // refreshing) doesn't throw away prices/values you already typed in.
+  const [savedInputs] = useState(() => portfolio.metadata.ytdBacktestInputs ?? { holdingPrices: {}, accountValues: {} });
 
   const [holdingRows, setHoldingRows] = useState(() =>
-    Object.fromEntries(holdings.map((h) => [`${h.accountId}::${h.ticker}`, { status: 'loading', price: '' }]))
+    Object.fromEntries(
+      holdings.map((h) => {
+        const key = `${h.accountId}::${h.ticker}`;
+        const saved = savedInputs.holdingPrices?.[key];
+        return [key, saved != null ? { status: 'manual', price: String(saved) } : { status: 'loading', price: '' }];
+      })
+    )
   );
   const [accountRows, setAccountRows] = useState(() =>
-    Object.fromEntries(nonTickerAccounts.map((a) => [a.id, String(accountCurrentValueSGD(a))]))
+    Object.fromEntries(
+      nonTickerAccounts.map((a) => {
+        const saved = savedInputs.accountValues?.[a.id];
+        return [a.id, saved != null ? String(saved) : String(accountCurrentValueSGD(a))];
+      })
+    )
   );
   const [saved, setSaved] = useState(false);
 
@@ -44,6 +58,7 @@ export default function YTDBacktestCalculator() {
     const jan1 = currentYearJan1();
     holdings.forEach(async (h) => {
       const key = `${h.accountId}::${h.ticker}`;
+      if (savedInputs.holdingPrices?.[key] != null) return; // don't clobber a saved manual entry with a fresh fetch
       const result = await fetchHistoricalPrice(h.ticker, jan1);
       setHoldingRows((prev) => ({
         ...prev,
@@ -71,6 +86,14 @@ export default function YTDBacktestCalculator() {
   for (const [id, val] of Object.entries(accountRows)) {
     if (val !== '' && val != null) accountValues[id] = Number(val);
   }
+
+  // Persist every keystroke (and each auto-fetch resolution) so this panel
+  // can be closed and reopened, or the page refreshed, without losing what's
+  // already been entered.
+  useEffect(() => {
+    setYTDBacktestInputs({ holdingPrices, accountValues });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holdingRows, accountRows]);
 
   const missingCount =
     holdings.filter((h) => holdingPrices[`${h.accountId}::${h.ticker}`] == null).length +

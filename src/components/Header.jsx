@@ -15,7 +15,7 @@ function formatTimestamp(iso) {
 
 export default function Header({ onOpenSettings }) {
   const { logout } = useAuth();
-  const { portfolio, syncIBKR, isSyncing, excludeCPF, toggleExcludeCPF, hideNumbers, toggleHideNumbers, forceRecalculate } = usePortfolio();
+  const { portfolio, syncIBKR, isSyncing, excludeCPF, toggleExcludeCPF, hideNumbers, toggleHideNumbers } = usePortfolio();
   const { theme, toggleTheme, themeFamily, toggleThemeFamily } = useTheme();
   const isWhimsy = themeFamily === 'whimsy';
 
@@ -85,11 +85,6 @@ export default function Header({ onOpenSettings }) {
           <button onClick={() => syncIBKR(loadedProxyUrl())} disabled={isSyncing} className="wd-btn-toggle" title="Sync IBKR account data">
             <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
             <span className="hidden sm:inline">{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
-          </button>
-
-          <button onClick={forceRecalculate} className="wd-btn-toggle" title="Recalculate all portfolio values (fixes stale data)">
-            <RefreshCw size={14} />
-            <span className="hidden sm:inline">Recalculate</span>
           </button>
 
           <button onClick={onOpenSettings} className="wd-btn-toggle" aria-label="Settings">

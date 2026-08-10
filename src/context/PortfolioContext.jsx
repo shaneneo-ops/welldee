@@ -174,19 +174,14 @@ export function PortfolioProvider({ children }) {
     });
   }
 
-  function forceRecalculate() {
-    // Nuclear reset: clear all localStorage and reload the page with default data.
-    // This is the only way to fix truly stale data that persists across browser sessions.
-    try {
-      localStorage.removeItem(STORAGE_KEYS.PORTFOLIO);
-      localStorage.removeItem(STORAGE_KEYS.IBKR_CACHE);
-      localStorage.removeItem(STORAGE_KEYS.HIDE_CPF);
-      localStorage.removeItem(STORAGE_KEYS.HIDE_NUMBERS);
-    } catch (e) {
-      console.error('Failed to clear localStorage:', e);
-    }
-    // Hard reload to get fresh defaultPortfolio
-    window.location.reload();
+  // Lets YTDBacktestCalculator survive unmount/refresh with whatever the
+  // user has typed so far, instead of resetting to auto-fetch/current-value
+  // defaults every time the panel reopens.
+  function setYTDBacktestInputs(inputs) {
+    setPortfolio((prev) => ({
+      ...prev,
+      metadata: { ...prev.metadata, ytdBacktestInputs: inputs },
+    }));
   }
 
   async function copyPortfolioToClipboard() {
@@ -251,7 +246,7 @@ export function PortfolioProvider({ children }) {
         toggleHideNumbers,
         importPortfolio,
         importPortfolioFromText,
-        forceRecalculate,
+        setYTDBacktestInputs,
         copyPortfolioToClipboard,
         pastePortfolioFromClipboard,
       }}
