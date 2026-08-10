@@ -29,21 +29,23 @@ function SyncButton({ syncMarketData, isSyncingPrices, priceSyncStatus }) {
     return () => clearTimeout(t);
   }, [priceSyncStatus.syncedAt]);
 
-  const hasFailures = priceSyncStatus.failed.length > 0;
+  // A "skip" isn't a failure to fix — holdings like DBS's unit trust have
+  // no exchange ticker at all, so Yahoo can never look them up, permanently.
+  // Styling that in alarming red/"failed" wording reads as broken when it's
+  // actually expected — this is purely informational.
+  const hasSkipped = priceSyncStatus.failed.length > 0;
   const title = priceSyncStatus.syncedAt
-    ? `Last synced ${new Date(priceSyncStatus.syncedAt).toLocaleTimeString('en-SG')} — ${priceSyncStatus.updated} price${priceSyncStatus.updated === 1 ? '' : 's'} updated${hasFailures ? `, ${priceSyncStatus.failed.length} couldn't be looked up (${priceSyncStatus.failed.join(', ')})` : ''}`
+    ? `Last synced ${new Date(priceSyncStatus.syncedAt).toLocaleTimeString('en-SG')} — ${priceSyncStatus.updated} price${priceSyncStatus.updated === 1 ? '' : 's'} updated${hasSkipped ? `. Skipped (no market ticker to look up, not an error): ${priceSyncStatus.failed.join(', ')}` : ''}`
     : 'Refresh live prices for your holdings and the Dividend Calendar';
 
   let label = 'Sync Now';
   if (isSyncingPrices) label = 'Syncing...';
-  else if (justSynced) label = hasFailures ? `Synced (${priceSyncStatus.failed.length} failed)` : 'Synced ✓';
+  else if (justSynced) label = hasSkipped ? `Synced ✓ (${priceSyncStatus.failed.length} skipped)` : 'Synced ✓';
 
   return (
     <button onClick={syncMarketData} disabled={isSyncingPrices} className="wd-btn-toggle" title={title}>
       <RefreshCw size={14} className={isSyncingPrices ? 'animate-spin' : ''} />
-      <span className="hidden sm:inline" style={hasFailures && justSynced ? { color: 'var(--wd-negative)' } : undefined}>
-        {label}
-      </span>
+      <span className="hidden sm:inline">{label}</span>
     </button>
   );
 }
