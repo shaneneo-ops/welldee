@@ -1,8 +1,9 @@
-import { RefreshCw, Settings, LogOut, EyeOff, Eye, Filter, FilterX, Moon, Sun } from 'lucide-react';
+import { RefreshCw, Settings, LogOut, EyeOff, Eye, Filter, FilterX, Moon, Sun, Sparkles, PenTool } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { usePortfolio } from '../context/PortfolioContext';
 import { useTheme } from '../context/ThemeContext';
 import { STORAGE_KEYS, DEFAULT_IBKR_PROXY_URL } from '../utils/constants';
+import Clock from './Clock';
 
 function formatTimestamp(iso) {
   if (!iso) return 'Never';
@@ -15,7 +16,8 @@ function formatTimestamp(iso) {
 export default function Header({ onOpenSettings }) {
   const { logout } = useAuth();
   const { portfolio, syncIBKR, isSyncing, excludeCPF, toggleExcludeCPF, hideNumbers, toggleHideNumbers, forceRecalculate } = usePortfolio();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, toggleTheme, themeFamily, toggleThemeFamily } = useTheme();
+  const isWhimsy = themeFamily === 'whimsy';
 
   return (
     <header
@@ -24,16 +26,39 @@ export default function Header({ onOpenSettings }) {
     >
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-2xl -rotate-6 inline-block" aria-hidden="true">🦄</span>
+          {isWhimsy ? (
+            <span
+              className="inline-flex items-center justify-center w-9 h-9 rounded-2xl shrink-0"
+              style={{ background: 'color-mix(in srgb, var(--wd-lavender) 20%, var(--wd-card-bg))' }}
+            >
+              <Sparkles size={18} style={{ color: 'var(--wd-lavender)' }} />
+            </span>
+          ) : (
+            <span className="text-2xl -rotate-6 inline-block" aria-hidden="true">🦄</span>
+          )}
           <div>
             <h1 className="text-lg wd-heading font-semibold leading-tight" style={{ color: 'var(--wd-text-heading)' }}>
               Welldee
             </h1>
             <p className="wd-subtle">Last updated {formatTimestamp(portfolio.metadata.lastUpdated)}</p>
           </div>
+          {isWhimsy && (
+            <div className="hidden md:block ml-4 shrink-0">
+              <Clock />
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap justify-end">
+          <button
+            onClick={toggleThemeFamily}
+            className={`wd-btn-toggle ${isWhimsy ? 'wd-btn-toggle-active' : ''}`}
+            title="Toggle Doodle / Whimsy Wealth style"
+          >
+            {isWhimsy ? <Sparkles size={14} /> : <PenTool size={14} />}
+            <span className="hidden sm:inline">{isWhimsy ? 'Whimsy' : 'Doodle'}</span>
+          </button>
+
           <button onClick={toggleTheme} className="wd-btn-toggle" title="Toggle dark / light mode">
             {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
             <span className="hidden sm:inline">{theme === 'dark' ? 'Light' : 'Dark'}</span>

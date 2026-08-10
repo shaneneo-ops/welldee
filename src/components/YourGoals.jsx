@@ -52,7 +52,8 @@ export default function YourGoals() {
     <div>
       <div className="flex items-baseline justify-between mb-1 flex-wrap gap-1">
         <h2 className="text-xl wd-heading font-semibold" style={{ color: 'var(--wd-text-heading)' }}>
-          🎯 Your Goals
+          <span className="wd-doodle-decor">🎯 </span>
+          Your Goals
         </h2>
       </div>
       <p className="wd-subtle mb-3">Grouped by account — named goals with targets aren't tracked yet.</p>
