@@ -416,10 +416,16 @@ export function computeProjectedAnnualDividends(portfolio) {
 // fabricated date. CPF/Bank accounts never appear (no dividend concept).
 export function computeDividendCalendar(portfolio, { fetchedCalendarData = {} } = {}) {
   const rows = [];
+  const today = new Date().toISOString().slice(0, 10);
 
   for (const holding of collectHoldings(portfolio)) {
     const data = fetchedCalendarData[holding.ticker];
-    if (!data || (!data.exDividendDate && !data.paymentDate)) continue;
+    if (!data) continue;
+    // Yahoo returns the *last known* ex-div date even for stocks that
+    // haven't paid one in years (verified live: a thin small-cap returned a
+    // 2021 date) — only a today-or-later date is actually "upcoming".
+    const hasFutureDate = (data.exDividendDate && data.exDividendDate >= today) || (data.paymentDate && data.paymentDate >= today);
+    if (!hasFutureDate) continue;
     rows.push({
       accountId: holding.accountId,
       ticker: holding.ticker,
