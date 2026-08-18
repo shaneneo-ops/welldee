@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useCallback, useEffect, useState } from 'react';
 import { STORAGE_KEYS } from '../utils/constants';
 import { loadJSON, saveJSON } from '../utils/storage';
 import { defaultPortfolio } from '../utils/defaultPortfolio';
@@ -31,10 +31,22 @@ export function PortfolioProvider({ children }) {
   // about what's calculated, only what's rendered.
   const [hideNumbers, setHideNumbers] = useState(() => loadJSON(STORAGE_KEYS.HIDE_NUMBERS, false));
 
+  // Backend sync state — tracks whether data is in sync with Postgres
+  const [backendSyncStatus, setBackendSyncStatus] = useState({ synced: false, syncing: false, error: null });
+  const [portfolioVersion, setPortfolioVersion] = useState(1);
+
   // Persist to localStorage on every change — the app's single write path.
   useEffect(() => {
     saveJSON(STORAGE_KEYS.PORTFOLIO, portfolio);
   }, [portfolio]);
+
+  // Auto-sync to backend on every portfolio change (debounced 2s to avoid thrashing)
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      await syncPortfolioToBackend();
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [syncPortfolioToBackend]);
 
   useEffect(() => {
     saveJSON(STORAGE_KEYS.IBKR_CACHE, syncStatus);
@@ -153,6 +165,78 @@ export function PortfolioProvider({ children }) {
       rebalancingHistory: (prev.rebalancingHistory ?? []).filter((e) => e.id !== id),
     }));
   }
+
+  // Backend sync — fetch portfolio from Postgres to keep cross-browser state in sync.
+  // Called on component mount and when user manually triggers a refresh.
+  async function fetchPortfolioFromBackend() {
+    const userId = localStorage.getItem('welldee_user_id');
+    if (!userId) return; // Not logged in, use localStorage
+
+    setBackendSyncStatus((prev) => ({ ...prev, syncing: true }));
+    try {
+      const res = await fetch('/api/portfolio', {
+        method: 'GET',
+        headers: { 'x-user-id': userId },
+      });
+
+      if (!res.ok) {
+        // 404 = first sync, 500 = backend error — both are OK, fall back to localStorage
+        if (res.status !== 404) {
+          const body = await res.json().catch(() => ({}));
+          console.warn('Backend fetch failed:', body.error || res.status);
+        }
+        setBackendSyncStatus({ synced: false, syncing: false, error: null });
+        return;
+      }
+
+      const { portfolio: backendPortfolio, version } = await res.json();
+      if (backendPortfolio) {
+        setPortfolio(backendPortfolio);
+        setPortfolioVersion(version);
+        setBackendSyncStatus({ synced: true, syncing: false, error: null });
+      }
+    } catch (err) {
+      console.error('Portfolio fetch error:', err);
+      setBackendSyncStatus((prev) => ({ ...prev, syncing: false, error: err.message }));
+    }
+  }
+
+  // Backend sync — save portfolio to Postgres so all browsers stay in sync.
+  // Called after every portfolio change (debounced 2s).
+  const syncPortfolioToBackend = useCallback(async () => {
+    const userId = localStorage.getItem('welldee_user_id');
+    if (!userId) return; // Not logged in, only use localStorage
+
+    setBackendSyncStatus((prev) => ({ ...prev, syncing: true }));
+    try {
+      const res = await fetch('/api/portfolio', {
+        method: 'POST',
+        headers: {
+          'x-user-id': userId,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ portfolio, localVersion: portfolioVersion }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Save failed (${res.status})`);
+      }
+
+      await res.json(); // Consume response
+      setPortfolioVersion((prev) => prev + 1); // Increment local version after successful save
+      setBackendSyncStatus({ synced: true, syncing: false, error: null });
+    } catch (err) {
+      console.error('Portfolio save error:', err);
+      setBackendSyncStatus((prev) => ({ ...prev, syncing: false, error: err.message }));
+    }
+  }, [portfolio, portfolioVersion]);
+
+  // On mount, fetch the latest portfolio from backend if user is logged in.
+  // This ensures all browsers pull the latest state when the app loads.
+  useEffect(() => {
+    fetchPortfolioFromBackend();
+  }, []);
 
   // Cowork (Phase 2): this is the function to call on a nightly schedule for
   // automated IBKR refresh — see README "Sync strategy".
@@ -288,6 +372,8 @@ export function PortfolioProvider({ children }) {
         isSyncingPrices,
         priceSyncStatus,
         dataRefreshKey,
+        fetchPortfolioFromBackend,
+        backendSyncStatus,
         excludeCPF,
         toggleExcludeCPF,
         hideNumbers,

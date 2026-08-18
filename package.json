@@ -12,6 +12,7 @@
     "export": "node scripts/export-portfolio.js both"
   },
   "dependencies": {
+    "@vercel/postgres": "^0.11.0",
     "cors": "^2.8.6",
     "express": "^4.22.2",
     "html2canvas": "^1.4.1",

@@ -13,12 +13,16 @@ export function AuthProvider({ children }) {
     if (passphrase !== ADMIN_PASSPHRASE) {
       return { ok: false, error: 'Incorrect passphrase. Please try again.' };
     }
+    // Generate a deterministic user ID for backend sync (same ID across all sessions/browsers)
+    const userId = `user-${Buffer.from(ADMIN_PASSPHRASE).toString('base64').slice(0, 16)}`;
+    localStorage.setItem('welldee_user_id', userId);
     saveJSON(STORAGE_KEYS.AUTH_SESSION, { authenticated: true, loginAt: new Date().toISOString() });
     setIsAuthenticated(true);
     return { ok: true };
   }
 
   function logout() {
+    localStorage.removeItem('welldee_user_id');
     removeKey(STORAGE_KEYS.AUTH_SESSION);
     setIsAuthenticated(false);
   }
