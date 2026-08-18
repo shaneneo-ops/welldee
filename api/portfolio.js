@@ -1,30 +1,21 @@
-// Vercel serverless function — fetch or save user's portfolio from/to Neon Postgres.
-// Used by PortfolioContext to sync across browsers/devices.
-// Requires: DATABASE_URL env var (auto-set by Neon integration)
+// Vercel serverless function — reads and writes the portfolio that keeps
+// every browser in sync. Backed by Neon Postgres; see lib/db.js for why the
+// schema is created on demand rather than by a setup script.
+//
+// GET  /api/portfolio  -> { portfolio, version, updatedAt }  (404 if none yet)
+// POST /api/portfolio  -> { ok, version }
+//
+// Identity is the x-user-id header, derived from the passphrase in
+// AuthContext. This is a single-user app behind a shared passphrase, so the
+// header is a partition key, not an authorization boundary.
 
-import pg from 'pg';
-
-const { Pool } = pg;
-
-// Initialize pool once per Lambda container warm start
-let pool;
-function getPool() {
-  if (!pool) {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-    });
-  }
-  return pool;
-}
+import { getPool, ensureSchema } from '../lib/db.js';
 
 export default async function handler(req, res) {
-  // CORS for local dev
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') {
-    res.status(200).end();
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-user-id');
+    res.status(204).end();
     return;
   }
 
@@ -34,86 +25,71 @@ export default async function handler(req, res) {
     return;
   }
 
-  const db = getPool();
-
   try {
-    // GET /api/portfolio — fetch latest portfolio for this user
+    const db = getPool();
+    await ensureSchema();
+
     if (req.method === 'GET') {
-      const result = await db.query(
-        'SELECT data, version, updated_at FROM portfolios WHERE user_id = $1 LIMIT 1',
+      const { rows } = await db.query(
+        'SELECT data, version, updated_at FROM portfolios WHERE user_id = $1',
         [userId]
       );
 
-      if (result.rows.length === 0) {
-        res.status(404).json({ error: 'Portfolio not found' });
+      if (rows.length === 0) {
+        // Nothing saved yet — the client keeps its local copy and the next
+        // save seeds the row. Not an error.
+        res.status(404).json({ error: 'No portfolio saved yet' });
         return;
       }
 
       res.status(200).json({
-        portfolio: result.rows[0].data,
-        version: result.rows[0].version,
-        updatedAt: result.rows[0].updated_at,
+        portfolio: rows[0].data,
+        version: rows[0].version,
+        updatedAt: rows[0].updated_at,
       });
       return;
     }
 
-    // POST /api/portfolio — save portfolio (with version-based conflict detection)
     if (req.method === 'POST') {
-      const { portfolio, localVersion } = req.body;
+      const { portfolio, localVersion } = req.body ?? {};
 
-      if (!portfolio) {
-        res.status(400).json({ error: 'Missing portfolio data' });
+      // Guard against writing a malformed payload over good data — a
+      // truncated or half-built object here would corrupt every browser.
+      if (!portfolio?.accounts || !portfolio?.metadata) {
+        res.status(400).json({ error: 'Payload is not a valid portfolio' });
         return;
       }
 
-      // Upsert: if user's portfolio exists, check version; if not, create
-      const existing = await db.query(
-        'SELECT version FROM portfolios WHERE user_id = $1',
-        [userId]
+      // Single statement upsert: seeds the row on first write, bumps the
+      // version on every later one. Doing this as one atomic statement means
+      // two browsers saving at once can't interleave a read and a write.
+      const { rows } = await db.query(
+        `INSERT INTO portfolios (user_id, data, version)
+         VALUES ($1, $2, 1)
+         ON CONFLICT (user_id) DO UPDATE
+           SET data = EXCLUDED.data,
+               version = portfolios.version + 1,
+               updated_at = CURRENT_TIMESTAMP
+         RETURNING version`,
+        [userId, JSON.stringify(portfolio)]
       );
 
-      if (existing.rows.length > 0) {
-        const serverVersion = existing.rows[0].version;
+      const newVersion = rows[0].version;
 
-        // Conflict detection: if local version doesn't match server, last-write-wins
-        if (localVersion && localVersion !== serverVersion) {
-          // Log the conflict for audit, but still save (last-write-wins)
-          await db.query(
-            `INSERT INTO sync_logs (id, user_id, action, local_version, server_version, conflict_resolved)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [
-              `sync-${Date.now()}-${Math.random()}`,
-              userId,
-              'conflict_detected',
-              localVersion,
-              serverVersion,
-              true,
-            ]
-          );
-        }
-
-        // Update existing portfolio
-        await db.query(
-          `UPDATE portfolios
-           SET data = $1, version = version + 1, updated_at = CURRENT_TIMESTAMP
-           WHERE user_id = $2`,
-          [JSON.stringify(portfolio), userId]
-        );
-      } else {
-        // Create new portfolio for this user
-        await db.query(
-          `INSERT INTO portfolios (id, user_id, data, version)
-           VALUES ($1, $2, $3, $4)`,
-          [
-            `portfolio-${userId}-${Date.now()}`,
-            userId,
-            JSON.stringify(portfolio),
-            1,
-          ]
-        );
+      // Last-write-wins, but record when a client saved against a version
+      // the server had already moved past — i.e. another browser wrote in
+      // between. Logged for visibility, never blocks the save.
+      if (localVersion && localVersion !== newVersion - 1) {
+        await db
+          .query(
+            `INSERT INTO sync_logs (user_id, action, local_version, server_version)
+             VALUES ($1, 'concurrent_write', $2, $3)`,
+            [userId, localVersion, newVersion]
+          )
+          .catch(() => {}); // Audit logging must never fail a real save
       }
 
-      res.status(200).json({ ok: true, message: 'Portfolio saved' });
+      res.status(200).json({ ok: true, version: newVersion });
       return;
     }
 

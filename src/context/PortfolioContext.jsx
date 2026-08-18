@@ -33,7 +33,10 @@ export function PortfolioProvider({ children }) {
 
   // Backend sync state — tracks whether data is in sync with Postgres
   const [backendSyncStatus, setBackendSyncStatus] = useState({ synced: false, syncing: false, error: null });
-  const [portfolioVersion, setPortfolioVersion] = useState(1);
+  // A ref, not state: the version is never rendered, and holding it in state
+  // would put it in syncPortfolioToBackend's dependencies — each save would
+  // change the callback identity and schedule another save, forever.
+  const portfolioVersion = useRef(1);
   // Blocks the auto-save until the initial backend fetch has resolved.
   // Without this, mounting would push whatever localStorage happened to hold
   // straight over the server copy — the exact cross-browser clobber this
@@ -199,7 +202,7 @@ export function PortfolioProvider({ children }) {
       const { portfolio: backendPortfolio, version } = await res.json();
       if (backendPortfolio?.accounts && backendPortfolio?.metadata) {
         setPortfolio(backendPortfolio);
-        setPortfolioVersion(version ?? 1);
+        portfolioVersion.current = version ?? 1;
         setBackendSyncStatus({ synced: true, syncing: false, error: null });
       }
     } catch (err) {
@@ -226,22 +229,25 @@ export function PortfolioProvider({ children }) {
           'x-user-id': userId,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ portfolio, localVersion: portfolioVersion }),
+        body: JSON.stringify({ portfolio, localVersion: portfolioVersion.current }),
       });
 
-      if (!res.ok) {
+      if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `Save failed (${res.status})`);
       }
 
-      await res.json(); // Consume response
-      setPortfolioVersion((prev) => prev + 1); // Increment local version after successful save
+      // Take the version the server assigned rather than guessing — a local
+      // increment drifts as soon as another browser writes, which would make
+      // every later save look like a conflict.
+      const { version } = await res.json();
+      portfolioVersion.current = version ?? 1;
       setBackendSyncStatus({ synced: true, syncing: false, error: null });
     } catch (err) {
       console.error('Portfolio save error:', err);
       setBackendSyncStatus((prev) => ({ ...prev, syncing: false, error: err.message }));
     }
-  }, [portfolio, portfolioVersion]);
+  }, [portfolio]);
 
   // On mount, fetch the latest portfolio from backend if user is logged in.
   // This ensures all browsers pull the latest state when the app loads.
