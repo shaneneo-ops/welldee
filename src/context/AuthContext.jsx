@@ -14,8 +14,13 @@ export function AuthProvider({ children }) {
       return { ok: false, error: 'Incorrect passphrase. Please try again.' };
     }
     // Generate a deterministic user ID for backend sync (same ID across all sessions/browsers)
-    const userId = `user-${Buffer.from(ADMIN_PASSPHRASE).toString('base64').slice(0, 16)}`;
-    localStorage.setItem('welldee_user_id', userId);
+    // Use btoa() for base64 encoding in browser (Buffer is Node.js only)
+    const userId = `user-${btoa(ADMIN_PASSPHRASE).slice(0, 16)}`;
+    try {
+      localStorage.setItem('welldee_user_id', userId);
+    } catch (err) {
+      console.warn('Failed to store user ID:', err);
+    }
     saveJSON(STORAGE_KEYS.AUTH_SESSION, { authenticated: true, loginAt: new Date().toISOString() });
     setIsAuthenticated(true);
     return { ok: true };
