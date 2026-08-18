@@ -1,4 +1,4 @@
-import { createContext, useContext, useCallback, useEffect, useState } from 'react';
+import { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react';
 import { STORAGE_KEYS } from '../utils/constants';
 import { loadJSON, saveJSON } from '../utils/storage';
 import { defaultPortfolio } from '../utils/defaultPortfolio';
@@ -34,19 +34,16 @@ export function PortfolioProvider({ children }) {
   // Backend sync state — tracks whether data is in sync with Postgres
   const [backendSyncStatus, setBackendSyncStatus] = useState({ synced: false, syncing: false, error: null });
   const [portfolioVersion, setPortfolioVersion] = useState(1);
+  // Blocks the auto-save until the initial backend fetch has resolved.
+  // Without this, mounting would push whatever localStorage happened to hold
+  // straight over the server copy — the exact cross-browser clobber this
+  // whole backend exists to prevent.
+  const hasHydrated = useRef(false);
 
   // Persist to localStorage on every change — the app's single write path.
   useEffect(() => {
     saveJSON(STORAGE_KEYS.PORTFOLIO, portfolio);
   }, [portfolio]);
-
-  // Auto-sync to backend on every portfolio change (debounced 2s to avoid thrashing)
-  useEffect(() => {
-    const timer = setTimeout(async () => {
-      await syncPortfolioToBackend();
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [syncPortfolioToBackend]);
 
   useEffect(() => {
     saveJSON(STORAGE_KEYS.IBKR_CACHE, syncStatus);
@@ -167,10 +164,15 @@ export function PortfolioProvider({ children }) {
   }
 
   // Backend sync — fetch portfolio from Postgres to keep cross-browser state in sync.
-  // Called on component mount and when user manually triggers a refresh.
-  async function fetchPortfolioFromBackend() {
+  // Called on mount and by the Header's "Sync Now". Every failure path is
+  // non-fatal: the app keeps running on the localStorage copy, because a
+  // sync feature must never be able to take the dashboard down.
+  const fetchPortfolioFromBackend = useCallback(async () => {
     const userId = localStorage.getItem('welldee_user_id');
-    if (!userId) return; // Not logged in, use localStorage
+    if (!userId) {
+      hasHydrated.current = true; // Not logged in — localStorage only, allow saves
+      return;
+    }
 
     setBackendSyncStatus((prev) => ({ ...prev, syncing: true }));
     try {
@@ -179,9 +181,14 @@ export function PortfolioProvider({ children }) {
         headers: { 'x-user-id': userId },
       });
 
-      if (!res.ok) {
-        // 404 = first sync, 500 = backend error — both are OK, fall back to localStorage
-        if (res.status !== 404) {
+      // Local `vite dev` has no /api routes, so it serves index.html with a
+      // 200 — same SPA-fallback trap the Yahoo services guard against.
+      const isJSON = res.headers.get('content-type')?.includes('application/json');
+
+      if (!res.ok || !isJSON) {
+        // 404 just means "nothing saved server-side yet" — the first save
+        // from this browser will seed it. Anything else, keep local data.
+        if (res.status !== 404 && isJSON) {
           const body = await res.json().catch(() => ({}));
           console.warn('Backend fetch failed:', body.error || res.status);
         }
@@ -190,22 +197,26 @@ export function PortfolioProvider({ children }) {
       }
 
       const { portfolio: backendPortfolio, version } = await res.json();
-      if (backendPortfolio) {
+      if (backendPortfolio?.accounts && backendPortfolio?.metadata) {
         setPortfolio(backendPortfolio);
-        setPortfolioVersion(version);
+        setPortfolioVersion(version ?? 1);
         setBackendSyncStatus({ synced: true, syncing: false, error: null });
       }
     } catch (err) {
       console.error('Portfolio fetch error:', err);
       setBackendSyncStatus((prev) => ({ ...prev, syncing: false, error: err.message }));
+    } finally {
+      // Whatever happened, the app is now free to start saving changes.
+      hasHydrated.current = true;
     }
-  }
+  }, []);
 
   // Backend sync — save portfolio to Postgres so all browsers stay in sync.
   // Called after every portfolio change (debounced 2s).
   const syncPortfolioToBackend = useCallback(async () => {
     const userId = localStorage.getItem('welldee_user_id');
     if (!userId) return; // Not logged in, only use localStorage
+    if (!hasHydrated.current) return; // Initial fetch hasn't landed yet
 
     setBackendSyncStatus((prev) => ({ ...prev, syncing: true }));
     try {
@@ -236,7 +247,17 @@ export function PortfolioProvider({ children }) {
   // This ensures all browsers pull the latest state when the app loads.
   useEffect(() => {
     fetchPortfolioFromBackend();
-  }, []);
+  }, [fetchPortfolioFromBackend]);
+
+  // Auto-save to the backend on every portfolio change, debounced 2s so a
+  // burst of edits (or a price sync touching 8 holdings) collapses into one
+  // write. Must stay below syncPortfolioToBackend's definition — referencing
+  // a `const` from an effect declared above it throws a temporal-dead-zone
+  // error at render and blanks the entire app.
+  useEffect(() => {
+    const timer = setTimeout(syncPortfolioToBackend, 2000);
+    return () => clearTimeout(timer);
+  }, [syncPortfolioToBackend]);
 
   // Cowork (Phase 2): this is the function to call on a nightly schedule for
   // automated IBKR refresh — see README "Sync strategy".
