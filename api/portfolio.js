@@ -1,8 +1,22 @@
-// Vercel serverless function — fetch or save user's portfolio from/to Postgres.
+// Vercel serverless function — fetch or save user's portfolio from/to Neon Postgres.
 // Used by PortfolioContext to sync across browsers/devices.
-// Requires: DATABASE_URL env var (auto-set by Vercel Postgres integration)
+// Requires: DATABASE_URL env var (auto-set by Neon integration)
 
-import { sql } from '@vercel/postgres';
+import pg from 'pg';
+
+const { Pool } = pg;
+
+// Initialize pool once per Lambda container warm start
+let pool;
+function getPool() {
+  if (!pool) {
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+    });
+  }
+  return pool;
+}
 
 export default async function handler(req, res) {
   // CORS for local dev
@@ -20,24 +34,25 @@ export default async function handler(req, res) {
     return;
   }
 
+  const db = getPool();
+
   try {
     // GET /api/portfolio — fetch latest portfolio for this user
     if (req.method === 'GET') {
-      const { rows } = await sql`
-        SELECT data, version, updated_at FROM portfolios
-        WHERE user_id = ${userId}
-        LIMIT 1
-      `;
+      const result = await db.query(
+        'SELECT data, version, updated_at FROM portfolios WHERE user_id = $1 LIMIT 1',
+        [userId]
+      );
 
-      if (rows.length === 0) {
+      if (result.rows.length === 0) {
         res.status(404).json({ error: 'Portfolio not found' });
         return;
       }
 
       res.status(200).json({
-        portfolio: rows[0].data,
-        version: rows[0].version,
-        updatedAt: rows[0].updated_at,
+        portfolio: result.rows[0].data,
+        version: result.rows[0].version,
+        updatedAt: result.rows[0].updated_at,
       });
       return;
     }
@@ -52,49 +67,50 @@ export default async function handler(req, res) {
       }
 
       // Upsert: if user's portfolio exists, check version; if not, create
-      const { rows: existing } = await sql`
-        SELECT version FROM portfolios WHERE user_id = ${userId}
-      `;
+      const existing = await db.query(
+        'SELECT version FROM portfolios WHERE user_id = $1',
+        [userId]
+      );
 
-      if (existing.length > 0) {
-        const serverVersion = existing[0].version;
+      if (existing.rows.length > 0) {
+        const serverVersion = existing.rows[0].version;
 
         // Conflict detection: if local version doesn't match server, last-write-wins
-        // (user's browser pushed changes, but another browser updated in between)
         if (localVersion && localVersion !== serverVersion) {
           // Log the conflict for audit, but still save (last-write-wins)
-          await sql`
-            INSERT INTO sync_logs (id, user_id, action, local_version, server_version, conflict_resolved)
-            VALUES (
-              ${`sync-${Date.now()}-${Math.random()}`},
-              ${userId},
+          await db.query(
+            `INSERT INTO sync_logs (id, user_id, action, local_version, server_version, conflict_resolved)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              `sync-${Date.now()}-${Math.random()}`,
+              userId,
               'conflict_detected',
-              ${localVersion},
-              ${serverVersion},
-              true
-            )
-          `;
+              localVersion,
+              serverVersion,
+              true,
+            ]
+          );
         }
 
         // Update existing portfolio
-        await sql`
-          UPDATE portfolios
-          SET data = ${JSON.stringify(portfolio)},
-              version = version + 1,
-              updated_at = CURRENT_TIMESTAMP
-          WHERE user_id = ${userId}
-        `;
+        await db.query(
+          `UPDATE portfolios
+           SET data = $1, version = version + 1, updated_at = CURRENT_TIMESTAMP
+           WHERE user_id = $2`,
+          [JSON.stringify(portfolio), userId]
+        );
       } else {
         // Create new portfolio for this user
-        await sql`
-          INSERT INTO portfolios (id, user_id, data, version)
-          VALUES (
-            ${`portfolio-${userId}-${Date.now()}`},
-            ${userId},
-            ${JSON.stringify(portfolio)},
-            1
-          )
-        `;
+        await db.query(
+          `INSERT INTO portfolios (id, user_id, data, version)
+           VALUES ($1, $2, $3, $4)`,
+          [
+            `portfolio-${userId}-${Date.now()}`,
+            userId,
+            JSON.stringify(portfolio),
+            1,
+          ]
+        );
       }
 
       res.status(200).json({ ok: true, message: 'Portfolio saved' });

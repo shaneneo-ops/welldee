@@ -12,8 +12,8 @@
     "export": "node scripts/export-portfolio.js both"
   },
   "dependencies": {
-    "@vercel/postgres": "^0.11.0",
     "cors": "^2.8.6",
+    "pg": "^8.11.0",
     "express": "^4.22.2",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
